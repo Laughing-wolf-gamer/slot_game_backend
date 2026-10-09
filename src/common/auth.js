@@ -54,6 +54,7 @@ export function createAuth(config) {
 		const store = await Store.findOne({ storeId, status: 'ACTIVE' }).lean();
 		assert(store, 'FORBIDDEN', 'Store access is blocked', 403);
 		if (config.hqRequired) {
+
 			assert(store.hqValidUntil && store.hqValidUntil > new Date(), 'FORBIDDEN', 'HQ validation has expired', 403);
 		
 		}
@@ -98,9 +99,11 @@ export function createAuth(config) {
 			dataId: randomUUID(),
 			tokenHash: hashToken(refreshToken),
 			storeId: user.storeId,
-			userId: user.userId, createdAt: new Date(), expiresAt: new Date(Date.now() + 7 * 86400000), revoked: false 
+			userId: user.userId,
+			expiresAt: new Date(Date.now() + 7 * 86400000), revoked: false 
 		});
-		return { accessToken: issue({
+		return {
+			accessToken: issue({
 			actorId: user.userId,
 			storeId: user.storeId,
 			role: user.role,
@@ -113,11 +116,11 @@ export function createAuth(config) {
 		const valid = user && await argon2.verify(user.passwordHash, data.password);
 
 		await Audit.insertOne({
+
 			dataId: randomUUID(),
 			storeId: data.storeId,
 			action: valid ? 'auth.login' : 'auth.login.failed',
 			actorId: user?.userId,
-			createdAt: new Date()
 		
 		});
 
@@ -129,9 +132,13 @@ export function createAuth(config) {
 	async function refresh(input) {
 		const { refreshToken } = z.object({ refreshToken: z.string().min(32).max(256) }).strict().parse(input);
 		const old = await RefreshToken.findOneAndUpdate({
-			tokenHash: hashToken(refreshToken), revoked: false, expiresAt: { $gt: new Date() } }, { $set: { revoked: true } }, { returnDocument: 'before' }).lean();
+			tokenHash: hashToken(refreshToken),
+			revoked: false, expiresAt: { $gt: new Date() } }, { $set: { revoked: true } }, { returnDocument: 'before' }).lean();
+			
 		assert(old, 'AUTH_REQUIRED', 'Invalid refresh token', 401);
 		const user = await User.findOne({ storeId: old.storeId, userId: old.userId, status: 'ACTIVE' }).lean();
+
+		logger.debug(user, "User Updated");
 		assert(user, 'AUTH_REQUIRED', 'User inactive', 401);
 
 		await validateHQ(user.storeId);
@@ -158,8 +165,11 @@ export function createAuth(config) {
 			storeId: row.storeId,
 			status: 'ACTIVE'
 		}).lean();
+
 		logger?.debug({ ...context, stage: 'authentication.store.lookup', active: Boolean(store) }, 'Store access checked');
+
 		assert(store, 'FORBIDDEN', 'Store blocked', 403);
+		
 		return { actorId: row.deviceId, sourceId: row.deviceId, storeId: row.storeId, role: row.role,
 		machineId: row.machineId, gameId: row.gameId, installationId: row.installationId, kioskId: row.kioskId };
 	}

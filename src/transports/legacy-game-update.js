@@ -12,5 +12,6 @@ export function normalizeLegacyGameUpdate(payload) {
 	const result = Object.fromEntries(Object.entries(payload).filter(([key]) => !snapshotFields.has(key)));
 	result.credit = payload.deposit;
 	result.bank = payload.bank;
+	
 	return result;
 }

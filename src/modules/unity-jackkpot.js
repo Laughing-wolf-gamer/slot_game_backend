@@ -37,7 +37,9 @@ export function selectUnityJackpot(pools, rules, choose = randomInt) {
 	
 	}
     const roll = choose(100);
+	logger.debug(roll,"Rndom roll");
     award.eventType = roll < 80 ? 'hint' : roll < 90 ? 'no_hint' : 'all_fruit';
+    // award.eventType = 'all_fruit';// testing only...
     if (award.eventType === 'all_fruit') {
         const variants = [['Cherry', 50000], ['Bell', 100000], ['Seven', 200000]];
         const [variant, payout] = variants[choose(variants.length)];

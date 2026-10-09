@@ -69,13 +69,28 @@ export function createHttp({ config, database, auth, backend }) {
 			
 		});
 	}
-	getters('/dashboard', 'dashboard'); getters('/machines', 'machines'); getters('/machines/:machineId/history', 'ledger');
-	getters('/games', 'games'); getters('/games/:gameId/settings', 'settings'); getters('/games/:gameId/pools', 'pools'); getters('/games/:gameId/sessions', 'sessions');
-	getters('/cards', 'cards'); getters('/cards/:cardId/ledger', 'ledger'); getters('/audit', 'audit');
-	getters('/settlements/current', 'settlements'); getters('/settlements/history', 'history'); getters('/machines/:machineId/commands', 'commands');
+	getters('/dashboard', 'dashboard');
+	getters('/machines', 'machines');
+	getters('/machines/:machineId/history', 'ledger');
+	getters('/games', 'games');
+	getters('/games/:gameId/settings', 'settings');
+	getters('/games/:gameId/pools', 'pools');
+	
+	getters('/games/:gameId/sessions', 'sessions');
+	getters('/cards', 'cards');
+	getters('/cards/:cardId/ledger', 'ledger');
+	
+	getters('/audit', 'audit');
+	getters('/settlements/current', 'settlements');
+	getters('/settlements/history', 'history');
+	
+	getters('/machines/:machineId/commands', 'commands');
 	setters('put', '/games/:gameId/settings', 'game.settings.update.v1');
-	setters('post', '/cards', 'card.create.v1'); setters('post', '/cards/:cardId/adjustments', 'card.adjust.v1');
-	setters('post', '/settlements/close', 'settlement.close.v1'); setters('post', '/machines/:machineId/commands', 'command.request.v1');
+	setters('post', '/cards', 'card.create.v1');
+	
+	setters('post', '/cards/:cardId/adjustments', 'card.adjust.v1');
+	setters('post', '/settlements/close', 'settlement.close.v1'); 
+	setters('post', '/machines/:machineId/commands', 'command.request.v1');
 
 	for (const action of ['paid', 'service', 'maintenance']){
 		

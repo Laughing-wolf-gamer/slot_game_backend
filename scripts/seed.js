@@ -3,7 +3,6 @@ import argon2 from 'argon2';
 import { loadConfig } from '../src/config.js';
 import { connectDatabase } from '../src/common/database.js';
 import { defaultSettings } from '../src/common/validation.js';
-import { getModel } from '../src/models/index.js';
 
 const config = loadConfig();
 if (!process.env.SEED_OWNER_PASSWORD || process.env.SEED_OWNER_PASSWORD.length < 12) {
@@ -24,12 +23,36 @@ try {
 	const now = new Date();
 	const defaultMachineTimeSeconds = 7 * 24 * 60 * 60;
 	const rows = {
-		stores: [{ storeId, name: 'Project Demo Store', timezone: 'Asia/India', status: 'ACTIVE', serverSequence: 0 }],
-		users: [{ storeId, userId: 'owner_demo', username: 'owner', role: 'STORE_OWNER', status: 'ACTIVE', tokenVersion: 1,
+		stores: [{
+			storeId,
+			name: 'Project Demo Store',
+			// timezone: 'Asia/India',
+			status: 'ACTIVE',
+			serverSequence: 0
+		
+		}],
+		users: [{
+			storeId,
+			userId: 'owner_demo',
+			username: 'owner',
+			role: 'STORE_OWNER',
+			status: 'ACTIVE',
+			tokenVersion: 1,
 		passwordHash: await argon2.hash(process.env.SEED_OWNER_PASSWORD, { type: argon2.argon2id }) }],
 
-		machines: [{ storeId, machineId: 'pc_001', machineNumber: 1, cardId: 'demo_card', timeStatus: 'ACTIVE',
-			deadline: new Date(now.getTime() + defaultMachineTimeSeconds * 1000), remainingSeconds: defaultMachineTimeSeconds, stateVersion: 1, feePlan: 0 }],
+		machines: [{
+			storeId,
+			machineId: 'pc_001',
+			machineNumber: 1,
+			cardId: 'demo_card',
+			timeStatus: 'ACTIVE',
+
+			deadline: new Date(now.getTime() + defaultMachineTimeSeconds * 1000),
+			remainingSeconds: defaultMachineTimeSeconds,
+			stateVersion: 1,
+			feePlan: 0
+		
+		}],
 		games: [{ storeId, gameId: 'seven_slot', name: 'Seven Slot', status: 'ACTIVE' }],
 		settings: [{ storeId, gameId: 'seven_slot', version: 1, settings: defaultSettings }],
 		cards: [{ storeId, cardId: 'demo_card', cardUid: 'demo_card_uid', displayNumber: '1234', status: 'ACTIVE', points: 0, stateVersion: 1 }],
@@ -51,12 +74,14 @@ try {
 	};
 	for (const [name, values] of Object.entries(rows)) for (const value of values) {
 		const filter = Object.fromEntries(keys[name].map(key => [key, value[key]]));
-		const Model = getModel(database, name);
+		const Model = database.models[name];
+		if (!Model) {
+			throw new Error(`Missing model for collection: ${name}`);
+		}
 
 		const record = new Model({
 			...value,
 			dataId: randomUUID(),
-			createdAt: now
 		});
 		await record.validate();
 		const document = record.toObject();

@@ -6,27 +6,59 @@ import Machine from '../models/machine.js';
 import Outbox from '../models/outbox.js';
 import Presence from '../models/presence.js';
 import Store from '../models/store.js';
-import { room, uid } from '../modules/backend.js';
+import Award from '../models/award.js';
+import { room, geneRandomId } from '../modules/backend.js';
 const logger = createConsoleLogger();
+function notificationNamespaces(row) {
+	logger.debug(row,"notification namespace ");
+    if (row.room.endsWith(':admins')) return ['/admin'];
+    if (row.room.includes(':installation:') || row.room.includes(':game:')) return ['/game'];
+    
+    return row.eventName === 'time.snapshot.v1' ? ['/agent', '/game'] : ['/agent'];
+}
 export function createWorkers({ backend, config, io }) {
 	let running = false;
 	let timer;
 	let pending = Promise.resolve();
-	async function tick() {
+	async function timerTicks() {
+        
+        const deliveryRoutes = [];
+        for (const name of ['/admin', '/game', '/agent']) {
+            const rooms = [...io.of(name).adapter.rooms].filter(([, sockets]) => sockets.size).map(([room]) => room);
+            const primary = rooms.filter(room => name === '/admin' ? room.endsWith(':admins') :
+                name === '/game' ? room.includes(':installation:') || room.includes(':game:') :
+                !room.endsWith(':admins') && !room.includes(':installation:') && !room.includes(':game:'));
+            if (primary.length) {
+				deliveryRoutes.push({ room: { $in: primary } });
+			
+			}
+            if (name === '/game') {
+                const machineRooms = rooms.filter(room => room.includes(':machine:'));
+                if (machineRooms.length) deliveryRoutes.push({ room: { $in: machineRooms }, eventName: 'time.snapshot.v1' });
+            }
+        }
+		const outbox = deliveryRoutes.length ? await Outbox.find({
+			status: 'PENDING', $or: deliveryRoutes
 		
-		const outbox = await Outbox.find({
-			status: 'PENDING'
-		
-		}).lean().sort({ createdAt: 1 }).limit(100).exec();
+		}).lean().sort({ createdAt: 1 }).limit(100).exec() : [];
 		// logger.info(outbox.length,"outbox pending");
 		for (const row of outbox) {
-			const namespace = row.room.endsWith(':admins') ? '/admin' : row.room.includes(':installation:') || row.room.includes(':game:') ? '/game' : '/agent';
-			const ns = io.of(namespace);
-			
-			if (!ns.adapter.rooms.get(row.room)?.size) {
+            const namespaces = notificationNamespaces(row).map(name => io.of(name))
+                .filter(ns => ns.adapter.rooms.get(row.room)?.size);
+			if (!namespaces.length) {
 				continue;
 			
 			}
+            if (row.eventName === 'game.jackpot.offer.v1') {
+                const current = await Award.exists({ storeId: row.storeId, awardId: row.payload.awardId,
+                    status: 'OFFERED', expiresAt: { $gt: new Date() } });
+                if (!current) {
+                    await Outbox.updateOne({ _id: row._id, status: 'PENDING' },
+                        { $set: { status: 'DISCARDED' } });
+                    continue;
+                }
+            }
+            for (const ns of namespaces) {
 			ns.to(row.room).emit(row.eventName, {
 				...row.payload,
 				notificationId: row.dataId
@@ -36,6 +68,7 @@ export function createWorkers({ backend, config, io }) {
 
 				ns.to(row.room).emit(legacy, row.payload);
 			}
+            }
 			await Outbox.updateOne({ _id: row._id, status: 'PENDING' }, { $set: { status: 'DELIVERED', deliveredAt: new Date() }, $inc: { attempts: 1 } });
 		}
 		await Presence.updateMany({ connected: true, lastSeenAt: { $lt: new Date(Date.now() - 30000) } }, { $set: { connected: false } });
@@ -55,12 +88,12 @@ export function createWorkers({ backend, config, io }) {
 				} 
 			}).lean().exec();
 
-			logger.info(expired?.length,`Expired Stroes Count`)
+			// logger.info(expired?.length,`Expired Stroes Count`)
 			for (const m of expired) {
 				try {
 					
 					await backend.dispatch(actor, {
-						eventId: `expire-${m.machineId}-${m.stateVersion}`, eventName: 'time.expire.internal', correlationId: uid(),
+						eventId: `expire-${m.machineId}-${m.stateVersion}`, eventName: 'time.expire.internal', correlationId: geneRandomId(),
 						payload: { machineId: m.machineId, expectedVersion: m.stateVersion, reason: 'Usage time expired' 
 				
 					} 
@@ -73,12 +106,15 @@ export function createWorkers({ backend, config, io }) {
 				}
 			}
 			const minute = Math.floor(Date.now() / 60000);
+            const tickSlot = Math.floor(Date.now() / 2000);
+            await backend.dispatch(actor, { eventId: `shared-jp-${tickSlot}`,
+                eventName: 'game.jackpot.shared.tick.internal', payload: {} });
 			await backend.dispatch(actor, { eventId: `network-${minute}`, eventName: 'network.tick.internal', correlationId: `network-${minute}`, payload: { minute } });
 			const commands = await Command.find({ storeId: store.storeId, status: { $in: ['REQUESTED', 'ACKNOWLEDGED'] }, expiresAt: { $lte: new Date() } }).lean().exec();
 			for (const command of commands) {
-				const result = await Command.updateOne({ _id: command._id, status: { $in: ['REQUESTED', 'ACKNOWLEDGED'] } }, { $set: { status: 'TIMED_OUT', updatedAt: new Date() } });
+				const result = await Command.updateOne({ _id: command._id, status: { $in: ['REQUESTED', 'ACKNOWLEDGED'] } }, { $set: { status: 'TIMED_OUT'} });
 				if (result.modifiedCount) {
-					await Audit.insertOne({ dataId: uid(), storeId: store.storeId, action: 'command.timeout', commandId: command.commandId, createdAt: new Date() });
+					await Audit.insertOne({ dataId: geneRandomId(), storeId: store.storeId, action: 'command.timeout', commandId: command.commandId });
 					io.of('/admin').to(room.admins(actor)).emit('command.timeout.v1', { commandId: command.commandId });
 				}
 			}
@@ -109,7 +145,7 @@ export function createWorkers({ backend, config, io }) {
 	}
 	function schedule() {
 		timer = setTimeout(() => {
-			pending = tick().catch(error => logger.error({ err: error }, 'Worker tick failed')).finally(() => {
+			pending = timerTicks().catch(error => logger.error({ err: error }, 'Worker tick failed')).finally(() => {
 				if (running){
 					schedule();
 				
@@ -119,7 +155,7 @@ export function createWorkers({ backend, config, io }) {
 		timer.unref();
 	}
 	return {
-			tick,
+			tick: timerTicks,
 			start() {
 			running = true;
 			schedule();

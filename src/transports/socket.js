@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { assert, errorBody } from '../common/errors.js';
 import { envelope } from '../common/validation.js';
 import { normalizeLegacyGameUpdate } from './legacy-game-update.js';
-import { clean, remaining, room, uid } from '../modules/backend.js';
+import { clean, remaining, room, geneRandomId } from '../modules/backend.js';
 import { createConsoleLogger } from '../common/logging.js';
 import Award from '../models/award.js';
 import Command from '../models/command.js';
@@ -24,6 +24,8 @@ export const legacyEvents = {
 	test_jackpot: ['game.jackpot.test.v1', null]
 };
 const canonical = [
+    'game.jackpot.fund.v1', 'game.jackpot.eligibility.v1', 'game.jackpot.local.check.v1',
+    'game.jackpot.offer.respond.v1',
 	'game.session.start.v1',
 	'game.state.update.v1',
     'game.state.restore.legacy.v1',
@@ -106,9 +108,17 @@ export function attachSockets(io, { auth, backend }) {
 					return;
 				
 				}
-				await Presence.updateOne(scope, { $set: { actorId: socketActor.actorId, sourceId: socketActor.sourceId,
-				role: socketActor.role, machineId: socketActor.machineId, gameId: socketActor.gameId, installationId: socketActor.installationId,
-				connected, lastSeenAt: new Date() }, $setOnInsert: { dataId: uid(), createdAt: new Date() } }, { upsert: true });
+				await Presence.updateOne(scope, {
+					$set: {
+							actorId: socketActor.actorId,
+							sourceId: socketActor.sourceId,
+							role: socketActor.role,
+							machineId: socketActor.machineId,
+							gameId: socketActor.gameId,
+							installationId: socketActor.installationId,
+							connected, lastSeenAt: new Date()
+						},
+							$setOnInsert: { dataId: geneRandomId(), } }, { upsert: true });
 				io.of('/admin').to(room.admins(socketActor)).emit('device.status.changed.v1', { actorId: socketActor.actorId, machineId: socketActor.machineId, connected });
 			}
 			async function authorized() {
@@ -132,6 +142,9 @@ export function attachSockets(io, { auth, backend }) {
 					socket.join(room.machine(socketActor));
 				}
 				if (name === '/game') {
+					socket.join(room.machine(socketActor));
+					const machine = await Machine.findOne({ ...store, machineId: socketActor.machineId }).lean();
+					if (machine) socket.emit('time.snapshot.v1', clean({ ...machine, remainingSeconds: remaining(machine) }));
 					initializationStage = 'game.snapshot';
 					socket.join(room.game(socketActor)); socket.join(room.installation(socketActor));
 					const s = await GameSession.findOne({ ...store, gameId: socketActor.gameId, machineId: socketActor.machineId, installationId: socketActor.installationId, recoverable: true }).lean();
@@ -140,7 +153,7 @@ export function attachSockets(io, { auth, backend }) {
 						socket.emit('game.session.snapshot.v1', clean(s));
 						socket.emit('reconnect', clean(s));
 						const awards = await Award.find({ ...store, gameId: socketActor.gameId, sessionId: s.sessionId, status: { $in: ['RESERVED', 'ACKNOWLEDGED'] } }).lean().exec();
-						logger.info({ stage: 'game.awards', count: awards.length }, 'Pending awards recovered');
+						// logger.info({ stage: 'game.awards', count: awards.length }, 'Pending awards recovered');
 						for (const award of awards) {
 							socket.emit(award.type === 'NORMAL' ? 'game.normal-win.assigned.v1' : 'game.jackpot.awarded.v1', clean(award));
 						
@@ -181,10 +194,10 @@ export function attachSockets(io, { auth, backend }) {
 					const startedAt = Date.now();
 					let stage = 'event.authorization';
 					let eventId;
-					logger.info({
+					/* logger.info({
 						stage: 'event.received',
 						eventName
-					}, 'Socket event received');
+					}, 'Socket event received'); */
 					let result;
 					try {
 						await authorized();

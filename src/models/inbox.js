@@ -8,13 +8,20 @@ export const schema = new mongoose.Schema({
 	eventId: { type: String, required: true },
 	fingerprint: { type: String, required: true },
 	result: { type: new mongoose.Schema({
+
 		ok: { type: Boolean, required: true },
 		eventId: { type: String, required: true },
-		serverSequence: { type: Number, required: true, validate: safeInteger, min: 0 },
+		serverSequence: {
+			type: Number,
+			required: true,
+			validate: safeInteger,
+			min: 0 },
 		serverTime: { type: String, required: true },
 		stateVersion: { type: Number, validate: safeInteger, min: 0 },
 		data: { type: mongoose.Schema.Types.Mixed },
 		error: { type: mongoose.Schema.Types.Mixed }
+
+
 	}, { _id: false, strict: false, minimize: false }), required: true }
 }, { collection: 'inbox',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 
