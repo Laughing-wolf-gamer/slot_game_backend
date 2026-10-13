@@ -13,7 +13,10 @@ export const schema = new mongoose.Schema({
 	installationId: { type: String },
 	kioskId: { type: String },
 	reason: { type: String },
-	revokedAt: { type: Date }
+	revokedAt: { type: Date },
+	lastAccessAt: Date,
+	lastAccessIp: String,
+	agentVersion: String
 }, { collection: 'devices',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 
 schema.index({"storeId":1,"deviceId":1}, {"unique":true});

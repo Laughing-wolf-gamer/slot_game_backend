@@ -7,8 +7,13 @@ export const schema = new mongoose.Schema({
 	cardId: { type: String, required: true },
 	cardUid: { type: String },
 	displayNumber: { type: String },
+	name: { type: String },
+	kind: { type: String, enum: ['PLAYER', 'ADMIN'], default: 'PLAYER' },
+	registeredAt: { type: Date },
+	deletedAt: { type: Date },
 	status: { type: String, required: true },
 	points: { type: Number, required: true, validate: safeInteger, min: 0, max: 1000000000000 },
+	timeMinutes: { type: Number, validate: safeInteger, min: 0, max: 1000000, default: 0 },
 	stateVersion: { type: Number, required: true, validate: safeInteger, min: 0 },
 	reason: { type: String }
 	

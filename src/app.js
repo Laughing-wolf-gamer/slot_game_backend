@@ -10,9 +10,9 @@ import { createConsoleLogger } from './common/logging.js';
 
 
 export function createApplication(database,config, logger = createConsoleLogger()) {
-	const auth = createAuth(config, logger);
+	const auth = createAuth(config, database);
 	const backend = createBackend(database, config, logger);
-	const dependencies = { config, auth, backend };
+	const dependencies = { config, database, auth, backend };
 	const app = createHttp(dependencies);
 	const http = createServer(app);
 	const io = new Server(http, { cors: { origin: config.origins }, 
@@ -22,7 +22,7 @@ export function createApplication(database,config, logger = createConsoleLogger(
 		pingTimeout: 15000,
 		allowRequest: (req, done) => done(null, !req.headers.origin || config.origins.includes(req.headers.origin)) 
 	});
-	attachSockets(io, dependencies);
+	const sockets = attachSockets(io, dependencies);
 	const workers = createWorkers({ ...dependencies, io });
 	return {
 		app,
@@ -43,6 +43,7 @@ export function createApplication(database,config, logger = createConsoleLogger(
 		async close() {
 			await workers.stop();
 			await new Promise(resolve => io.close(resolve)); 
+			await sockets.drain();
 		} 
 	};
 }

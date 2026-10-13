@@ -12,8 +12,10 @@ const logger = createConsoleLogger();
 function notificationNamespaces(row) {
 	logger.debug(row,"notification namespace ");
     if (row.room.endsWith(':admins')) return ['/admin'];
+    if (row.room.includes(':kiosk:')) return ['/kiosk'];
     if (row.room.includes(':installation:') || row.room.includes(':game:')) return ['/game'];
     
+    if (row.eventName.startsWith('game.')) return ['/game'];
     return row.eventName === 'time.snapshot.v1' ? ['/agent', '/game'] : ['/agent'];
 }
 export function createWorkers({ backend, config, io }) {
@@ -23,24 +25,25 @@ export function createWorkers({ backend, config, io }) {
 	async function timerTicks() {
         
         const deliveryRoutes = [];
-        for (const name of ['/admin', '/game', '/agent']) {
+        for (const name of ['/admin', '/game', '/agent', '/kiosk']) {
             const rooms = [...io.of(name).adapter.rooms].filter(([, sockets]) => sockets.size).map(([room]) => room);
             const primary = rooms.filter(room => name === '/admin' ? room.endsWith(':admins') :
                 name === '/game' ? room.includes(':installation:') || room.includes(':game:') :
-                !room.endsWith(':admins') && !room.includes(':installation:') && !room.includes(':game:'));
+                name === '/kiosk' ? room.includes(':kiosk:') :
+                !room.endsWith(':admins') && !room.includes(':installation:') && !room.includes(':game:') && !room.includes(':kiosk:'));
             if (primary.length) {
 				deliveryRoutes.push({ room: { $in: primary } });
 			
 			}
             if (name === '/game') {
                 const machineRooms = rooms.filter(room => room.includes(':machine:'));
-                if (machineRooms.length) deliveryRoutes.push({ room: { $in: machineRooms }, eventName: 'time.snapshot.v1' });
+                if (machineRooms.length) deliveryRoutes.push({ room: { $in: machineRooms }, eventName: { $in: ['time.snapshot.v1', 'game.settings.updated.v1'] } });
             }
         }
 		const outbox = deliveryRoutes.length ? await Outbox.find({
 			status: 'PENDING', $or: deliveryRoutes
 		
-		}).lean().sort({ createdAt: 1 }).limit(100).exec() : [];
+		}).lean().sort({ createdAt: 1, _id: 1 }).limit(100).exec() : [];
 		// logger.info(outbox.length,"outbox pending");
 		for (const row of outbox) {
             const namespaces = notificationNamespaces(row).map(name => io.of(name))

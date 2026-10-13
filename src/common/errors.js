@@ -13,6 +13,7 @@ export function assert(condition, code, message, status = 400) {
 	}
 }
 export function errorBody(error) {
+	console.error("error: ",error);
 	const validation = ['ZodError', 'ValidationError', 'CastError'].includes(error.name);
 	return {
 

@@ -114,6 +114,8 @@ export const schema = new mongoose.Schema({
 		min: 0
 	
 	},
+	appliedSettings: mongoose.Schema.Types.Mixed,
+	machineSettingsVersion: { type: Number, validate: safeInteger, min: 1 },
 	gameplayMode: {
 		type: String,
 		enum: ['UNITY_LOCAL'],

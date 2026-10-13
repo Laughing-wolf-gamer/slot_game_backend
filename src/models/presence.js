@@ -13,6 +13,7 @@ export const schema = new mongoose.Schema({
 	installationId: { type: String },
 	connected: { type: Boolean, required: true },
 	lastSeenAt: { type: Date, required: true }
+	
 }, {collection: 'presence',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 
 schema.index({"storeId":1,"createdAt":-1}, {});

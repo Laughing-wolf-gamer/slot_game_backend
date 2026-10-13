@@ -5,6 +5,11 @@ export const schema = new mongoose.Schema({
 	dataId: { type: String },
 	storeId: { type: String, required: true },
 	machineId: { type: String, required: true },
+	status: { type: String, enum: ['ACTIVE', 'DELETED'], default: 'ACTIVE' },
+	operationalStatus: { type: String, enum: ['IN_USE', 'STOPPED', 'UNUSED'], default: 'UNUSED' },
+	ipAddress: String,
+	supplyDate: Date,
+	deletedAt: Date,
 	machineNumber: { type: Number, required: true, validate: safeInteger, min: 0 },
 	feePlan: { type: Number, validate: safeInteger, min: 0 },
 	timeStatus: { type: String, required: true },
@@ -12,7 +17,9 @@ export const schema = new mongoose.Schema({
 	deadline: { type: Date,  },
 	cardId: { type: String },
 	stateVersion: { type: Number, required: true, validate: safeInteger, min: 0 },
-	reason: { type: String, default:"Exited" }
+
+	
+	reason: { type: String, default:"Latest Machine Created" }
   	
 }, { collection: 'machines',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 

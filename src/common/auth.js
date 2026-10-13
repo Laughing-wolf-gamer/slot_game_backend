@@ -10,6 +10,8 @@ import User from '../models/user.js';
 import RefreshToken from '../models/refresh-token.js';
 import Audit from '../models/audit.js';
 import Device from '../models/device.js';
+import HqOutbox from '../models/hq-outbox.js';
+const logger = createConsoleLogger();
 
 export const hashToken = token => createHash('sha256').update(token).digest('hex');
 export function requireRole(actor, roles) {
@@ -25,9 +27,8 @@ export const owners = ['STORE_OWNER', 'HQ_SUPER_ADMIN'];
 export const operators = [...owners, 'STORE_STAFF'];
 export const readers = [...owners, 'READ_ONLY_AUDITOR'];
 
-const logger = createConsoleLogger();
 
-export function createAuth(config) {
+export function createAuth(config, database) {
 
 	const issue = actor => jwt.sign(actor, config.jwtSecret, { expiresIn: '60m', issuer: 'project-j', audience: 'project-j-clients' });
 	async function access(input) {
@@ -108,7 +109,7 @@ export function createAuth(config) {
 			storeId: user.storeId,
 			role: user.role,
 			tokenVersion: user.tokenVersion 
-		}), refreshToken, expiresIn: 900 };
+		}), refreshToken, expiresIn: 3600 };
 	}
 	async function login(input) {
 		const data = z.object({ storeId: id, username: id, password: z.string().min(1).max(256) }).strict().parse(input);
@@ -127,6 +128,8 @@ export function createAuth(config) {
 		assert(valid, 'AUTH_REQUIRED', 'Invalid credentials', 401);
 		await validateHQ(user.storeId);
 		await entitlement(user.storeId);
+		if (database && user.role === 'HQ_SUPER_ADMIN') await HqOutbox.insertOne({ storeId: user.storeId, dataId: randomUUID(),
+			type: 'hq.login', payload: { actorId: user.userId, at: new Date() }, status: 'PENDING', attempts: 0 });
 		return tokens(user);
 	}
 	async function refresh(input) {
@@ -138,7 +141,6 @@ export function createAuth(config) {
 		assert(old, 'AUTH_REQUIRED', 'Invalid refresh token', 401);
 		const user = await User.findOne({ storeId: old.storeId, userId: old.userId, status: 'ACTIVE' }).lean();
 
-		logger.debug(user, "User Updated");
 		assert(user, 'AUTH_REQUIRED', 'User inactive', 401);
 
 		await validateHQ(user.storeId);
@@ -187,7 +189,36 @@ export function createAuth(config) {
 		
 		}).lean(), 'FORBIDDEN', 'Store blocked', 403);
 	}
-	return { access, login, refresh, device, activeDevice, entitlement,
+	async function verifyPassword(actor, input) {
+		const data = z.object({ password: z.string().min(1).max(256) }).strict().parse(input);
+		// logger.info(data,"verifying password")
+		const user = await User.findOne({ storeId: actor.storeId, userId: actor.actorId, status: 'ACTIVE', tokenVersion: actor.tokenVersion }).lean();
+		const valid = Boolean(user && await argon2.verify(user.passwordHash, data.password));
+		await Audit.insertOne({
+			storeId: actor.storeId,
+			dataId: randomUUID(),
+			actorId: actor.actorId,
+			action: valid ? 'auth.password.verified' : 'auth.password.failed' 
+		
+		});
+		assert(valid, 'AUTH_REQUIRED', 'Invalid password', 401);
+		return { verified: true };
+	}
+	async function changePassword(actor, input) {
+		const data = z.object({ currentPassword: z.string().min(1).max(256), newPassword: z.string().min(12).max(256) }).strict().parse(input);
+		await verifyPassword(actor, { password: data.currentPassword });
+		const passwordHash = await argon2.hash(data.newPassword, { type: argon2.argon2id });
+		await database.transaction(async session => {
+			const opts = { session };
+			const result = await User.updateOne({ storeId: actor.storeId, userId: actor.actorId, tokenVersion: actor.tokenVersion, status: 'ACTIVE' },
+				{ $set: { passwordHash }, $inc: { tokenVersion: 1 } }, opts);
+			assert(result.matchedCount, 'AUTH_REQUIRED', 'Credential changed', 401);
+			await RefreshToken.updateMany({ storeId: actor.storeId, userId: actor.actorId }, { $set: { revoked: true } }, opts);
+			await Audit.insertOne({ storeId: actor.storeId, dataId: randomUUID(), actorId: actor.actorId, action: 'auth.password.changed' }, opts);
+		});
+		return { changed: true, loginRequired: true };
+	}
+	return { access, login, refresh, device, activeDevice, entitlement, verifyPassword, changePassword,
 		logout: async input => {
 		const { refreshToken } = z.object({
 			refreshToken: z.string().min(32).max(256)

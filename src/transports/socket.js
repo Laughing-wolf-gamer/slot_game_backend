@@ -9,6 +9,8 @@ import Command from '../models/command.js';
 import Machine from '../models/machine.js';
 import Presence from '../models/presence.js';
 import GameSession from '../models/session.js';
+import Device from '../models/device.js';
+import { adminlistEvents } from '../modules/admin-updates-event.js';
 
 const logger = createConsoleLogger();
 
@@ -24,6 +26,8 @@ export const legacyEvents = {
 	test_jackpot: ['game.jackpot.test.v1', null]
 };
 const canonical = [
+    ...adminlistEvents,
+    'agent.activate.v1',
     'game.jackpot.fund.v1', 'game.jackpot.eligibility.v1', 'game.jackpot.local.check.v1',
     'game.jackpot.offer.respond.v1',
 	'game.session.start.v1',
@@ -39,6 +43,11 @@ const canonical = [
 	'command.request.v1', 'command.ack.v1', 'command.result.v1', 'settlement.close.v1'];
 
 export function attachSockets(io, { auth, backend }) {
+	const pendingWrites = new Set();
+	function track(promise) {
+		pendingWrites.add(promise);
+		promise.then(() => pendingWrites.delete(promise), () => pendingWrites.delete(promise));
+	}
 	const validationErrors = [
 		'ZodError',
 		'ValidationError',
@@ -73,7 +82,6 @@ export function attachSockets(io, { auth, backend }) {
 			try {
 
 				const credentials = socket.conn.protocol === 3 ? socket.handshake.query : socket.handshake.auth;
-				logger.info(credentials,"connectd socket");
 				socket.data = socket.data || {};
 				socket.data.actor = role ? await auth.device(credentials, role) : await auth.access(socket.handshake.auth?.token);
 				const actor = socket.data.actor;
@@ -141,6 +149,7 @@ export function attachSockets(io, { auth, backend }) {
 				if (name === '/agent') {
 					socket.join(room.machine(socketActor));
 				}
+				if (name === '/kiosk') socket.join(`store:${socketActor.storeId}:kiosk:${socketActor.kioskId}`);
 				if (name === '/game') {
 					socket.join(room.machine(socketActor));
 					const machine = await Machine.findOne({ ...store, machineId: socketActor.machineId }).lean();
@@ -179,14 +188,14 @@ export function attachSockets(io, { auth, backend }) {
 				await presence(true);
 				logger.info({ stage: 'initialization.complete' }, 'Socket initialization completed');
 			}
-			initialize().catch(error => {
+			track(initialize().catch(error => {
 				logger.error({
 					stage: initializationStage,
 					...failureDetails(error) 
 				
 				}, 'Socket initialization failed'); 
 				socket.disconnect(true);
-			});
+			}));
 			for (const eventName of [...canonical, ...Object.keys(legacyEvents)]) {
 
 				socket.on(eventName, async (input, ack) => {
@@ -282,7 +291,11 @@ export function attachSockets(io, { auth, backend }) {
 					try {
 						await authorized();
 
-						z.object({ version: z.string().max(64).optional() }).strict().parse(input || {});
+						const report = z.object({ version: z.string().max(64).optional() }).strict().parse(input || {});
+						if (role) await Device.updateOne({ ...store, deviceId: socketActor.actorId }, {
+							$set: { lastAccessAt: new Date(), lastAccessIp: socket.handshake.address,
+								...(report.version ? { agentVersion: report.version } : {}) }
+						});
 
 						await presence(true); ack?.({ ok: true, serverTime: new Date().toISOString() });
 						// logger.debug({ stage: 'heartbeat.complete', eventName }, 'Device presence refreshed');
@@ -332,8 +345,9 @@ export function attachSockets(io, { auth, backend }) {
 			socket.on('disconnect', reason => {
 				logger.info({ stage: 'connection.disconnected', reason }, 'Socket disconnected');
 				closing = true;
-				presence(false).catch(error => logger.error({ stage: 'presence.disconnected', ...failureDetails(error) }, 'Presence write failed'));
+				track(presence(false).catch(error => logger.error({ stage: 'presence.disconnected', ...failureDetails(error) }, 'Presence write failed')));
 			});
 		});
 	}
+	return { async drain() { while (pendingWrites.size) await Promise.allSettled([...pendingWrites]); } };
 }

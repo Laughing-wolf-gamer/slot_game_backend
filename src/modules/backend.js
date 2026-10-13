@@ -26,13 +26,15 @@ import Outbox from '../models/outbox.js';
 import HqOutbox from '../models/hq-outbox.js';
 import JackpotClient from '../models/jackpot-client.js';
 import { createDualJackpot } from './shared-jackpot.js';
+import MachineSettings from '../models/machine-settings.js';
+import { adminlistEvents, createAdminDat, hexUid, paidTimeAmount, readStoreConfig, historyQuery } from './admin-updates-event.js';
 
 const logger = createConsoleLogger();
 
 export const geneRandomId = () => randomUUID();
 
-const defaultMachineTimeSeconds = 7 * 24 * 60 * 60;// 7day expiery timef
-export const clean = value => JSON.parse(JSON.stringify(value, (key, v) => ['_id', 'passwordHash', 'secretHash', 'cardUid'].includes(key) ? undefined : v));
+const defaultMachineTimeSeconds = 0;
+export const clean = value => JSON.parse(JSON.stringify(value, (key, v) => ['_id', 'passwordHash', 'passwordHashes', 'secretHash', 'cardUid'].includes(key) ? undefined : v));
 export const room = {
 	admins: a => `store:${a.storeId}:admins`,
 	game: a => `store:${a.storeId}:game:${a.gameId}`,
@@ -48,7 +50,7 @@ export const remaining = (machine) => machine?.timeStatus === 'ACTIVE' ? Math.ma
 
 
 const defaultsCardDataAddded = () => ({
-	credit: 200000,
+	credit: 0,
 	bank: 0,
 	deposit: 0,
 	totalBet: 0,
@@ -61,6 +63,7 @@ const stable = value => JSON.stringify(value, (_, v) => v && typeof v === 'objec
 
 export function createBackend(database, config) {
 	const dualJackpot = createDualJackpot({ findSession, notify, room, remaining, ledger });
+	const adminEvents = createAdminDat({ notify, room, remaining, ledger });
 	
 	async function dispatch(actor, event) {
 
@@ -121,13 +124,27 @@ export function createBackend(database, config) {
 					eventId: event.eventId, correlationId: event.correlationId, reason: event.payload.reason,
 					targetId: data?.sessionId || data?.commandId || data?.cardId || event.payload.gameId || event.payload.machineId,
 					stateVersion: data?.stateVersion,
+					cardId: data?.cardId || event.payload.cardId, kioskId: actor.kioskId,
+					sourceId: actor.sourceId, success: true,
 					
 				
 				}, opts);
+				if (!['SYSTEM', 'GAME_CLIENT'].includes(actor.role) && !event.eventName.endsWith('.verify.v1')) {
+					await HqOutbox.insertOne({ storeId: actor.storeId, dataId: geneRandomId(), type: 'activity.recorded',
+						payload: { action: event.eventName, actorId: actor.actorId, eventId: event.eventId,
+							machineId: actor.machineId || event.payload.machineId, cardId: data?.cardId,
+							kioskId: actor.kioskId, serverTime: currentContext.now, reason: event.payload.reason },
+						status: 'PENDING', attempts: 0 }, opts);
+				}
 				await notify(currentContext, room.admins(actor), 'store.updated.v1', { eventName: event.eventName, serverSequence: store.serverSequence });
 				return result;
 			});
 		} catch (error) {
+			if (event.eventName === 'card.validate.v1' || event.eventName.endsWith('password.verify.v1')) {
+				await Audit.insertOne({ storeId: actor.storeId, dataId: geneRandomId(), actorId: actor.actorId,
+					action: `${event.eventName}.failed`, eventId: event.eventId, machineId: actor.machineId,
+					kioskId: actor.kioskId, success: false });
+			}
 			if (error.code === 11000) {
 				const existing = await Inbox.findOne(key).lean();
 				if (existing) { assert(existing.fingerprint === fingerprint, 'DUPLICATE_EVENT', 'Event ID reused with different content'); return existing.result; }
@@ -175,8 +192,13 @@ export function createBackend(database, config) {
 
 		let setting = await Settings.findOne(scope, null, { ...ctx.opts, sort: { version: -1 } }).lean();
 		if (!setting) { 
-			setting = { ...scope, dataId: geneRandomId(), version: 1, settings: defaultSettings }; 
+			const configuration = await readStoreConfig(ctx.actor.storeId, ctx.opts);
+			setting = { ...scope, dataId: geneRandomId(), version: 1, settings: { ...defaultSettings, ...configuration.totalJackpot } };
 			await Settings.insertOne(setting, ctx.opts); 
+		}
+		if (ctx.actor.machineId) {
+			const override = await MachineSettings.findOne({ ...scope, machineId: ctx.actor.machineId }, null, ctx.opts).lean();
+			if (override) return { ...setting, settings: override.settings, machineSettingsVersion: override.version, machineId: ctx.actor.machineId };
 		}
 		return setting;
 	}
@@ -216,6 +238,23 @@ export function createBackend(database, config) {
 		const p = e.payload;
 		const storeScope = { storeId: a.storeId };
 		const gameId = a.gameId || p.gameId;
+		if (e.eventName === 'agent.activate.v1') {
+			requireRole(a, ['DEVICE_TAS_C']);
+			const input = z.object({ cardId: id, pointsSpent: money.refine(n => n > 0), expectedVersion: version,
+				reason: reason.default('Card activation') }).strict().parse(p);
+			const machine = await Machine.findOne({ ...storeScope, machineId: a.machineId, status: { $ne: 'DELETED' } }, null, opts).lean();
+			assert(machine, 'NOT_FOUND', 'Machine missing', 404);
+			const rate = await paidTimeAmount(a.storeId, machine, 1, opts);
+			assert(input.pointsSpent % rate === 0, 'INVALID_PAYLOAD', 'Points must buy a whole number of minutes');
+			return handle({ ...ctx, event: { ...e, eventName: 'time.session.start.v1', payload: {
+				machineId: a.machineId, cardId: input.cardId, minutes: input.pointsSpent / rate,
+				amount: input.pointsSpent, expectedVersion: input.expectedVersion, reason: input.reason } } });
+		}
+		if (adminlistEvents.includes(e.eventName)) {
+
+			return adminEvents.handle(ctx);
+		}
+
 		if (['game.jackpot.fund.v1', 'game.jackpot.eligibility.v1', 'game.jackpot.local.check.v1',
             'game.jackpot.offer.respond.v1', 'game.jackpot.shared.tick.internal'].includes(e.eventName))
             return dualJackpot.handle(ctx);
@@ -229,10 +268,29 @@ export function createBackend(database, config) {
 				return game;
 			}
 			case 'registry.machine.create.v1': {
+				logger.info(p,"input data received");
 				requireRole(a, owners);
-				const input = z.object({ machineId: id, machineNumber: z.number().int().positive(), feePlan: money.default(0), reason }).strict().parse(p);
-				const machine = { ...storeScope, ...input, dataId: geneRandomId(), timeStatus: 'ACTIVE', remainingSeconds: defaultMachineTimeSeconds,
-					deadline: new Date(now.getTime() + defaultMachineTimeSeconds * 1000), stateVersion: 1, };
+				const input = z.object({
+					machineId: id,
+					machineNumber: z.number().int().positive(),
+					feePlan: money.default(0),
+					ipAddress:z.union([z.ipv4(), z.ipv6()]).optional(),
+					supplyDate: z.coerce.date().optional(),
+					reason
+				}).strict().parse(p);
+
+				const machine = {
+					...storeScope,
+					...input,
+					dataId: geneRandomId(),
+					status: 'ACTIVE',
+					operationalStatus: 'UNUSED',
+					timeStatus: 'IDLE',
+					remainingSeconds: defaultMachineTimeSeconds,
+					deadline: null,
+					stateVersion: 1
+				};
+				
 				await Machine.insertOne(machine, opts);
 				return machine;
 			}
@@ -242,7 +300,7 @@ export function createBackend(database, config) {
 				machineId: id.optional(), gameId: id.optional(), installationId: id.optional(), kioskId: id.optional(),
 				secret: z.string().min(24).max(256), reason }).strict().parse(p);
 				if (input.role !== 'DEVICE_TAS_K') assert(input.machineId &&
-					await Machine.findOne({ ...storeScope, machineId: input.machineId }, null, opts).lean(), 'INVALID_PAYLOAD', 'Registered machine required');
+					await Machine.findOne({ ...storeScope, machineId: input.machineId, status: { $ne: 'DELETED' } }, null, opts).lean(), 'INVALID_PAYLOAD', 'Active registered machine required');
 				if (input.role === 'GAME_CLIENT') {
 					assert(input.installationId && input.gameId, 'INVALID_PAYLOAD', 'Game and installation identity required');
 					await getSettings(ctx, input.gameId);
@@ -257,8 +315,13 @@ export function createBackend(database, config) {
 					
 				}
 				const { secret, ...fields } = input;
-				const device = { ...storeScope, ...fields, dataId: geneRandomId(),
-					secretHash: await argon2.hash(secret, { type: argon2.argon2id }), status: 'ACTIVE'};
+				const device = {
+					...storeScope,
+					...fields,
+					dataId: geneRandomId(),
+					secretHash: await argon2.hash(secret, { type: argon2.argon2id }),
+					
+					status: 'ACTIVE'};
 				await Device.insertOne(device, opts);
 				return device;
 			}
@@ -282,7 +345,6 @@ export function createBackend(database, config) {
 				requireRole(a, owners);
 				const input = z.object({ username: id, role: z.enum(['STORE_OWNER', 'STORE_STAFF', 'READ_ONLY_AUDITOR']), password: z.string().min(12).max(256), reason }).strict().parse(p);
 				const { password, ...fields } = input;
-				logger.info(input,"inputs ");
 				const user = {
 					...storeScope,
 					...fields,
@@ -350,7 +412,8 @@ export function createBackend(database, config) {
 						cardId: input.cardId, status: 'ACTIVE', recoverable: true,
 						stateVersion: 1, clientSequence: e.sequence || 0,
 						state: defaultsCardDataAddded(), 
-						settingsVersion: setting.version
+						settingsVersion: setting.version, appliedSettings: setting.settings,
+						machineSettingsVersion: setting.machineSettingsVersion
 						
 					};
 
@@ -510,10 +573,11 @@ export function createBackend(database, config) {
 						version: s.settingsVersion
 					
 					}, null, opts).lean();
-					const normalPart = bps(input.betAmount, setting.settings.normalWinning.percentageBps);
+					const applied = s.appliedSettings || setting.settings;
+					const normalPart = bps(input.betAmount, applied.normalWinning.percentageBps);
 					const jackpotPart = input.betAmount - normalPart;
-					const sj = bps(jackpotPart, setting.settings.smallJackpot.percentageBps);
-					const mj = bps(jackpotPart, setting.settings.mediumJackpot.percentageBps);
+					const sj = bps(jackpotPart, applied.smallJackpot.percentageBps);
+					const mj = bps(jackpotPart, applied.mediumJackpot.percentageBps);
 
 					await pool(ctx, a.gameId, 'SJ', sj); 
 					await pool(ctx, a.gameId, 'MJ', mj);
@@ -571,16 +635,16 @@ export function createBackend(database, config) {
 					exitReason: z.enum(exits)
 				
 				}).strict().parse(p);
-				logger.info(input)
 				const s = await findSession(ctx, input.sessionId, input.stateVersion);
-				const pending = await Award.countDocuments({ ...storeScope, gameId: a.gameId, sessionId: s.sessionId, status: { $in: ['RESERVED', 'ACKNOWLEDGED'] } }, opts);
+				const pending = await Award.countDocuments({ ...storeScope, gameId: a.gameId, sessionId: s.sessionId, status: { $in: ['OFFERED', 'RESERVED', 'ACKNOWLEDGED'] } }, opts);
 				if (manual.includes(input.exitReason)) {
 
 					assert(pending === 0, 'AWARD_PENDING', 'Complete reserved awards before player exit');
 
 					const setting = await Settings.findOne({ ...storeScope, gameId: a.gameId, version: s.settingsVersion }, null, opts).lean();
 
-					const commission = setting.settings.commission.enabled ? bps(s.state.bank, setting.settings.commission.percentageBps) : 0;
+					const commissionSettings = s.appliedSettings || setting.settings;
+					const commission = commissionSettings.commission.enabled ? bps(s.state.bank, commissionSettings.commission.percentageBps) : 0;
 					const amount = safeAdd(s.state.credit, s.state.bank - commission);
 					const card = await Card.findOne({ ...storeScope, cardId: s.cardId }, null, opts).lean();
 					assert(card, 'NOT_FOUND', 'Card missing', 404);
@@ -631,8 +695,8 @@ export function createBackend(database, config) {
 				assert(!await GameSession.findOne({
 					...storeScope,
 					gameId: input.gameId,
-					status: 'ACTIVE'
-				}, null, opts).lean(), 'SETTINGS_LOCKED', 'Active sessions prevent settings changes', 409);
+					recoverable: true
+				}, null, opts).lean(), 'SETTINGS_LOCKED', 'Recoverable sessions prevent settings changes', 409);
 				const next = { ...storeScope, dataId: geneRandomId(), gameId: input.gameId, version: old.version + 1, settings: input.settings, reason: input.reason, actorId: a.actorId };
 				await Settings.insertOne(next, opts);
 				await notify(ctx, room.game(next), 'game.settings.updated.v1', next);
@@ -641,15 +705,31 @@ export function createBackend(database, config) {
 			}
 			case 'card.create.v1': {
 				requireRole(a, operators);
-				const input = z.object({ cardId: id, cardUid: id, displayNumber: z.string().max(32) }).strict().parse(p);
-				const card = { ...storeScope, ...input, dataId: geneRandomId(), status: 'ACTIVE', points: 0, stateVersion: 1 };
+				const input = z.object({ cardId: id, cardUid: hexUid, displayNumber: z.string().max(32),
+					name: z.string().max(128).optional(), points: money.default(0), date: z.coerce.date().optional(),
+					timeMinutes: z.number().int().min(0).max(1000000).default(0),
+					kind: z.enum(['PLAYER', 'ADMIN']).default('PLAYER') }).strict().parse(p);
+				if (input.points > 0 || input.timeMinutes > 0 || input.kind === 'ADMIN') {
+					requireRole(a, owners);
+				}
+				const checkCardExist = await Card.exists({...storeScope, cardUid: { $regex: `^(?:0x)?${input.cardUid}$`, $options: 'i' } }).session(opts.session);
+				assert(!checkCardExist, 'CONFLICT', 'Card hex code already registered', 409);
+				const card = { ...storeScope, ...input, registeredAt: input.date || now, dataId: geneRandomId(), status: 'ACTIVE', stateVersion: 1 };
 				await Card.insertOne(card, opts);
+				await ledger(ctx, 'card_registration', input.points, { cardId: card.cardId, cardDelta: input.points, balanceAfter: input.points });
+				if (input.timeMinutes) await ledger(ctx, 'card_time_adjustment', 0, { cardId: card.cardId, seconds: input.timeMinutes * 60 });
 				return card;
 			}
 			case 'card.validate.v1': {
 				requireRole(a, ['DEVICE_TAS_C', 'DEVICE_TAS_K', ...operators]);
-				const input = z.object({ cardId: id }).strict().parse(p);
-				const card = await Card.findOne({ ...storeScope, cardId: input.cardId, status: 'ACTIVE' }, null, opts).lean();
+				const input = z.object({ cardId: id.optional(), cardUid: hexUid.optional(), machineNumber: z.number().int().positive().optional(), kioskFlag: z.boolean().optional() })
+					.strict().refine(v => Boolean(v.cardId) !== Boolean(v.cardUid), 'Supply exactly one card identity').parse(p);
+				if (a.role === 'DEVICE_TAS_C') {
+					const machine = await Machine.findOne({ ...storeScope, machineId: a.machineId, status: { $ne: 'DELETED' } }, null, opts).lean();
+					assert(machine && (input.machineNumber === undefined || input.machineNumber === machine.machineNumber), 'FORBIDDEN', 'PC must match enrolled agent', 403);
+				}
+				const identity = input.cardId ? { cardId: input.cardId } : { cardUid: { $regex: `^(?:0x)?${input.cardUid}$`, $options: 'i' } };
+				const card = await Card.findOne({ ...storeScope, ...identity, status: 'ACTIVE' }, null, opts).lean();
 				assert(card, 'CARD_INACTIVE', 'Card not valid');
 				
 				return card;
@@ -657,7 +737,9 @@ export function createBackend(database, config) {
 			case 'card.adjust.v1':
 			case 'kiosk.topup.requested.v1': {
 				if (e.eventName === 'card.adjust.v1') requireRole(a, owners); else requireRole(a, ['DEVICE_TAS_K']);
-				const input = z.object({ cardId: id, amount: z.number().int().min(-1_000_000_000_000).max(1_000_000_000_000).refine(v => v !== 0), reason, billId: id.optional() }).strict().parse(p);
+				const input = z.object({ cardId: id, amount: z.number().int().min(-1_000_000_000_000).max(1_000_000_000_000).refine(v => v !== 0), reason, billId: id.optional(),
+					transactionMethod: z.enum(['CASH', 'CARD', 'OTHER']).optional(), validationSuccessCount: z.number().int().nonnegative().optional(),
+					cashInjectionData: z.object({ denomination: money, count: z.number().int().positive().max(10000) }).strict().optional(), cardName: z.string().max(128).optional() }).strict().parse(p);
 				if (a.role === 'DEVICE_TAS_K') {
 					
 					assert(input.amount > 0 && input.billId, 'INVALID_PAYLOAD', 'Positive amount and billId required');
@@ -673,7 +755,9 @@ export function createBackend(database, config) {
 				const points = safeAdd(card.points, input.amount);
 				await Card.updateOne({ ...storeScope, cardId: input.cardId }, { $set: { points }, $inc: { stateVersion: 1 } }, opts);
 				await ledger(ctx, a.role === 'DEVICE_TAS_K' ? 'topup' : 'card_adjustment', input.amount, { cardId: card.cardId,
-				cardDelta: input.amount, balanceAfter: points, kioskId: a.kioskId, billId: input.billId, reason: input.reason });
+				cardDelta: input.amount, balanceAfter: points, kioskId: a.kioskId, billId: input.billId, reason: input.reason,
+				transactionMethod: input.transactionMethod, validationSuccessCount: input.validationSuccessCount,
+				cashInjectionData: input.cashInjectionData, cardName: input.cardName || card.name });
 
 				return { ...card, points, stateVersion: card.stateVersion + 1, completed: true };
 			}
@@ -685,17 +769,30 @@ export function createBackend(database, config) {
 			case 'time.resume.v1':
 			case 'time.delete.v1':
 			case 'time.expire.internal': {
-				requireRole(a, e.eventName === 'time.expire.internal' ? ['SYSTEM'] : operators);
-				const input = z.object({ machineId: id, cardId: id.optional(), minutes: z.number().int().positive().optional(),
-				expectedVersion: version, reason, amount: money.optional() }).strict().parse(p);
-				const m = await Machine.findOne({ ...storeScope, machineId: input.machineId }, null, opts).lean();
+				requireRole(a, e.eventName === 'time.expire.internal' ? ['SYSTEM'] :
+					e.eventName === 'time.session.start.v1' ? [...operators, 'DEVICE_TAS_C'] : operators);
+				const input = z.object({
+					machineId: id,
+					cardId: id.optional(),
+					minutes: z.number().int().positive().optional(),
+					useCardTime: z.boolean().optional(),
+					expectedVersion: version, reason, amount: money.optional()
+				
+				}).strict().parse(p);
+				if (a.role === 'DEVICE_TAS_C') {
+
+					assert(input.machineId === a.machineId, 'FORBIDDEN', 'Agent can activate only its enrolled PC', 403);
+				}
+				const m = await Machine.findOne({ ...storeScope, machineId: input.machineId, status: { $ne: 'DELETED' } }, null, opts).lean();
 				assert(m, 'NOT_FOUND', 'Machine missing', 404);
 				assert(m.stateVersion === input.expectedVersion, 'STALE_VERSION', 'Machine version changed', 409);
+
 				let seconds = remaining(m), delta = 0;
 
 				if (e.eventName.includes('add.') || e.eventName === 'time.session.start.v1') {
 					assert(input.minutes && input.minutes <= (e.eventName.includes('maintenance') ? 10 : 500), 'INVALID_PAYLOAD', 'Time addition exceeds per-operation limit');
 					if (input.cardId) {
+						
 						assert(await Card.findOne({ ...storeScope, cardId: input.cardId, status: 'ACTIVE' }, null, opts).lean(), 'CARD_INACTIVE', 'Card inactive');
 						assert(!await GameSession.findOne({ ...storeScope, machineId: m.machineId, recoverable: true, cardId: { $ne: input.cardId } }, null, opts).lean(), 'RECOVERY_CARD_MISMATCH', 'Previous card has recoverable game balance');
 						assert(seconds === 0 || !m.cardId || m.cardId === input.cardId, 'FORBIDDEN', 'Cannot replace the current card', 403);
@@ -709,11 +806,20 @@ export function createBackend(database, config) {
 					
 					}
 					if (e.eventName === 'time.add.paid.v1' || e.eventName === 'time.session.start.v1') {
-						assert(input.amount !== undefined, 'INVALID_PAYLOAD', 'Paid time requires an explicit amount');
 						const card = await Card.findOne({ ...storeScope, cardId: m.cardId, status: 'ACTIVE' }, null, opts).lean();
+						if (input.useCardTime) {
+							assert(card && card.timeMinutes >= input.minutes, 'INSUFFICIENT_BALANCE', 'Not enough prepaid card time');
+							assert(input.amount === undefined || input.amount === 0, 'INVALID_PAYLOAD', 'Prepaid time does not debit points');
+							await Card.updateOne({ ...storeScope, cardId: m.cardId }, { $inc: { timeMinutes: -input.minutes, stateVersion: 1 } }, opts);
+							await ledger(ctx, 'card_time_usage', 0, { machineId: m.machineId, cardId: m.cardId, seconds: delta });
+						} else {
+						const calculated = await paidTimeAmount(a.storeId, m, input.minutes, opts);
+						assert(input.amount === undefined || input.amount === calculated, 'INVALID_PAYLOAD', 'Amount must match the configured usage fee');
+						input.amount = calculated;
 						assert(card && card.points >= input.amount, 'INSUFFICIENT_BALANCE', 'Not enough card points');
 						await Card.updateOne({ ...storeScope, cardId: m.cardId }, { $inc: { points: -input.amount, stateVersion: 1 } }, opts);
 						await ledger(ctx, 'paid_time', input.amount, { machineId: m.machineId, cardId: m.cardId, cardDelta: -input.amount, seconds: delta });
+						}
 					}
 				} else if (e.eventName === 'time.pause.v1') {
 				
@@ -742,6 +848,7 @@ export function createBackend(database, config) {
 					}
 				}
 				m.remainingSeconds = seconds; m.deadline = m.timeStatus === 'ACTIVE' ? new Date(now.getTime() + seconds * 1000) : null; m.stateVersion++;
+				m.operationalStatus = m.timeStatus === 'ACTIVE' ? 'IN_USE' : m.timeStatus === 'PAUSED' ? 'STOPPED' : 'UNUSED';
 				await Machine.replaceOne({ ...storeScope, machineId: m.machineId }, m, opts);
 				await ledger(ctx, 'time_change', delta, { machineId: m.machineId, cardId: m.cardId, mode: e.eventName, reason: input.reason });
 				await notify(ctx, room.machine(m), 'time.snapshot.v1', { ...m, remainingSeconds: remaining(m) });
@@ -965,7 +1072,7 @@ export function createBackend(database, config) {
 					
 						continue;
 					}
-					const setting = await getSettings(ctx, s.gameId);
+					const setting = await getSettings({ ...ctx, actor: { ...a, machineId: s.machineId } }, s.gameId);
                     if (await JackpotClient.findOne({ ...storeScope, gameId: s.gameId,
                         installationId: s.installationId }, null, opts).lean()) continue;
 					const contribution = setting.settings.network.contributionPerMinute;
@@ -1025,6 +1132,19 @@ export function createBackend(database, config) {
 			storeId: actor.storeId
 		
 		};
+		if (['setup', 'environment', 'fees', 'totalJackpot'].includes(kind)) {
+			requireRole(actor, [...operators, 'READ_ONLY_AUDITOR']);
+			const configuration = await readStoreConfig(actor.storeId);
+			if (kind !== 'setup') return clean(configuration);
+			return clean({ configuration, machines: await Machine.find(scope).lean(),
+				games: await Game.find(scope).lean(), settings: await Settings.find(scope).sort({ version: -1 }).lean(),
+				machineSettings: await MachineSettings.find(scope).lean() });
+		}
+		if (kind === 'machineSettings') {
+			requireRole(actor, [...operators, 'READ_ONLY_AUDITOR']);
+			return clean(await MachineSettings.find({ ...scope, machineId: id.parse(params.machineId), gameId: id.parse(params.gameId) }).lean());
+		}
+		if (kind === 'histories') return clean(await historyQuery(actor, params));
 		if (['audit', 'settlements', 'history', 'ledger', 'pools'].includes(kind)) {
 			requireRole(actor, readers);
 		}
@@ -1043,7 +1163,9 @@ export function createBackend(database, config) {
 			const sessions = await GameSession.find({ ...scope, status: 'ACTIVE' }).lean().exec();
 			const presence = await Presence.find({ ...scope, connected: true, lastSeenAt: { $gt: new Date(Date.now() - 30000) } }).lean().exec();
 			return clean({
+				environment: (await readStoreConfig(actor.storeId)).environment,
 				machines: machines.map(m => ({ ...m, remainingSeconds: remaining(m),
+				isInSession: sessions.some(s => s.machineId === m.machineId),
 				connection: presence.some(p => p.machineId === m.machineId && p.role === 'DEVICE_TAS_C') ? 'ONLINE' : 'OFFLINE',
 				runningGames: sessions.filter(s => s.machineId === m.machineId).map(s => ({ gameId: s.gameId, sessionId: s.sessionId })) })) });
 		}
@@ -1057,7 +1179,12 @@ export function createBackend(database, config) {
 
 			$lt: z.coerce.date().parse(params.before)
 		};
-		const results = await c(names[kind]).find({ ...scope, ...extra }, { _id: 0, cardUid: 0 }).lean().sort(kind === 'settings' ? { version: -1 } : { createdAt: -1 }).limit(limit).exec();
+		for (const key of ['kioskId', 'type']) if (params[key]) extra[key] = id.parse(params[key]);
+		if (params.action) extra.action = z.string().max(128).parse(params.action);
+		if (params.from || params.to) extra.createdAt = { ...extra.createdAt,
+			...(params.from ? { $gte: z.coerce.date().parse(params.from) } : {}),
+			...(params.to ? { $lte: z.coerce.date().parse(params.to) } : {}) };
+		const results = await database.models[names[kind]].find({ ...scope, ...extra }, { _id: 0, cardUid: 0 }).lean().sort(kind === 'settings' ? { version: -1 } : { createdAt: -1 }).limit(limit).exec();
 		if (actor.role === 'STORE_STAFF') return clean(results.map(item => {
 
 

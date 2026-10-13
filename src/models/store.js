@@ -9,7 +9,7 @@ export const schema = new mongoose.Schema({
 	status: { type: String, required: true },
 	serverSequence: { type: Number, validate: safeInteger, min: 0 },
 	hqValidatedAt: { type: Date,  },
-	hqValidUntil: { type: Date,  }
+	hqValidUntil: { type: Date, }
 }, { collection: 'stores',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 
 schema.index({"storeId":1}, {"unique":true});

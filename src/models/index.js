@@ -18,11 +18,13 @@ import outbox from './outbox.js';
 import presence from './presence.js';
 import hqOutbox from './hq-outbox.js';
 import jackpotClient from './jackpot-client.js';
+import storeConfig from './store-config.js';
+import machineSettings from './machine-settings.js';
 import { createConsoleLogger } from '../common/logging.js';
 const logger = createConsoleLogger();
 export const models = Object.freeze(Object.fromEntries([
 	store, user, device, machine, game, card, settings, session, pool, award, inbox,
-	period, command, refreshToken, ledger, audit, outbox, presence, hqOutbox, jackpotClient
+	period, command, refreshToken, ledger, audit, outbox, presence, hqOutbox, jackpotClient, storeConfig, machineSettings
 ].map(model => [model.collection.name, model])));
 
 
