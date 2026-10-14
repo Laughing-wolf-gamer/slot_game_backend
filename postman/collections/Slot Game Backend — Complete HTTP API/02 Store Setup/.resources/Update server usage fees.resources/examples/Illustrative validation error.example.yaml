@@ -1,0 +1,32 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/usage-fees"
+  method: PUT
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "expectedVersion": {{configVersion}},
+        "reason": "{{reason}}",
+        "pointsPerMinute": 10
+      }
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

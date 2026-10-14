@@ -1,0 +1,32 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/games"
+  method: POST
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "gameId": "{{gameId}}",
+        "name": "Seven Slot",
+        "reason": "{{reason}}"
+      }
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

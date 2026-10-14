@@ -1,0 +1,77 @@
+$kind: collection
+description: |-
+  All 71 HTTP method/path contracts from src/transports/http.js, with titled requests, role and payload descriptions, response-shape examples and token/version capture. Generated 14 October 2026.
+
+  Import this JSON, set collection variables baseUrl/storeId/username/password, then run Store administrator login. Collection {{bearer_token_0b1z}} is inherited; health and login/refresh/logout are noauth. HQ requests use hqAccessToken. Keep secrets in private/local variable values.
+
+  GET responses, registration responses and mutations capture the versions used by subsequent requests. Refresh versions after other clients change records. A machineSettings empty array means version 0; a config before creation is version 0.
+
+  New machines start idle and game sessions start at zero credit. Configure usage fees, register card/game/machine/device, assign paid time, then use the Socket.IO game operations described in SOCKET_API.md.
+
+  Do not run every folder as an unattended setup script: reset/delete/password/command requests are real operations. Examples are illustrative shapes, not captured live-server responses. Numeric version placeholders are intentionally unquoted in raw JSON and resolve at send time. For retries, use original eventId and body/version.
+
+  The accompanying Local environment sets baseUrl only; credentials and identifiers are collection variables to keep token/version capture effective. Existing Postman workspace files are preserved.
+variables:
+  baseUrl: http://localhost:5000
+  storeId: store_demo
+  username: owner
+  password: ""
+  accessToken: ""
+  refreshToken: ""
+  newPassword: ""
+  storePassword: ""
+  newStorePassword: ""
+  machineId: pc_001
+  machineNumber: "1"
+  cardId: card_001
+  adminCardId: admin_card_001
+  cardUid: DEADBEEF
+  gameId: seven_slot
+  deviceId: unity_001
+  agentDeviceId: agent_001
+  kioskDeviceId: kiosk_001
+  deviceSecret: ""
+  installationId: installation_001
+  kioskId: kiosk_001
+  sessionId: ""
+  actorId: operator_001
+  reason: Postman operator action
+  eventId: ""
+  lastEventId: ""
+  configVersion: "0"
+  machineVersion: "1"
+  cardVersion: "1"
+  adminCardVersion: "1"
+  settingsVersion: "1"
+  machineSettingsVersion: "0"
+  historyCategory: card-usage
+  passwordKind: setup
+  from: ""
+  to: ""
+  before: ""
+  historyCursor: ""
+  hqCursor: ""
+  hqHomeStoreId: store_demo
+  hqStoreId: store_demo
+  hqUsername: hq_admin
+  hqPassword: ""
+  hqAccessToken: ""
+  hqRefreshToken: ""
+  hqMachineId: hq_pc_001
+  hqMachineVersion: "1"
+  newAdminUsername: "store_admin_001"
+  newAdminPassword: ""
+  adminUserId: ""
+scripts:
+  - type: http:beforeRequest
+    code: |-
+      const id = pm.variables.get('eventId') || pm.variables.replaceIn('{{$guid}}');
+      pm.variables.set('_requestEventId', id);
+      pm.collectionVariables.set('lastEventId', id);
+    language: text/javascript
+auth:
+  - id: 2c577438-3320-4844-a194-9c50596914b1
+    type: bearer
+    name: bearer auth
+    credentials:
+      token: "{{accessToken}}"

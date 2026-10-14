@@ -1,0 +1,35 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/cards/{{cardId}}"
+  method: PATCH
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "expectedVersion": {{cardVersion}},
+        "reason": "{{reason}}",
+        "points": 1000,
+        "timeMinutes": 60,
+        "displayNumber": "0001",
+        "name": "Player Card"
+      }
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

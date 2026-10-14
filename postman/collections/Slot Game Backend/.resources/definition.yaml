@@ -1,0 +1,64 @@
+$kind: collection
+auth:
+  type: bearer
+  credentials:
+    token: "{{accessToken}}"
+variables:
+  baseUrl: http://localhost:5000
+  storeId: store_demo
+  accessToken: ""
+  refreshToken: ""
+  gameId: ""
+  machineId: ""
+  cardId: ""
+  kioskId: ""
+  category: card-usage
+  lastEventId: ""
+  cardVersion: "1"
+  configVersion: ""
+  settingsVersion: ""
+  username: owner
+  password: ""
+  newPassword: ""
+  storePassword: ""
+  newStorePassword: ""
+  newAdminUsername: store_admin_001
+  newAdminPassword: ""
+  adminUserId: ""
+  machineNumber: "1"
+  adminCardId: admin_card_001
+  cardUid: DEADBEEF
+  deviceId: unity_001
+  agentDeviceId: agent_001
+  kioskDeviceId: kiosk_001
+  deviceSecret: ""
+  installationId: installation_001
+  sessionId: ""
+  actorId: operator_001
+  reason: Postman operator action
+  eventId: ""
+  machineVersion: "1"
+  adminCardVersion: "1"
+  machineSettingsVersion: "0"
+  historyCategory: card-usage
+  passwordKind: setup
+  from: ""
+  to: ""
+  before: ""
+  historyCursor: ""
+  hqCursor: ""
+  hqHomeStoreId: store_demo
+  hqStoreId: store_demo
+  hqUsername: hq_admin
+  hqPassword: ""
+  hqAccessToken: ""
+  hqRefreshToken: ""
+  hqMachineId: hq_pc_001
+  hqMachineVersion: "1"
+scripts:
+  - type: http:beforeRequest
+    code: |-
+      const id = pm.variables.get('eventId') || pm.variables.replaceIn('{{$guid}}');
+      pm.variables.set('_requestEventId', id);
+      pm.collectionVariables.set('lastEventId', id);
+    language: text/javascript

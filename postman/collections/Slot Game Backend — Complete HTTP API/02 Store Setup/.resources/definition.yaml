@@ -1,0 +1,3 @@
+$kind: collection
+description: Documented store setup operations. Each request describes its own permissions and required input.
+order: 3000

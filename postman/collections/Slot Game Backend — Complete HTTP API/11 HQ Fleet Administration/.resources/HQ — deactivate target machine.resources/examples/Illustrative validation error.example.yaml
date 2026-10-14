@@ -1,0 +1,35 @@
+$kind: http-example
+auth:
+  type: bearer
+  credentials:
+    token: "{{hqAccessToken}}"
+request:
+  url: "{{baseUrl}}/api/v1/hq/stores/{{hqStoreId}}/machines/{{hqMachineId}}"
+  method: DELETE
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "expectedVersion": {{hqMachineVersion}},
+        "reason": "{{reason}}"
+      }
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

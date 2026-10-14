@@ -1,0 +1,49 @@
+$kind: http-request
+name: Register Admin User
+method: POST
+url: "{{baseUrl}}/api/v1/stores/{{storeId}}/users"
+order: 5500
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "eventId": "{{_requestEventId}}",
+      "username": "{{newAdminUsername}}",
+      "password": "{{newAdminPassword}}",
+      "role": "STORE_OWNER",
+      "reason": "Register store administrator"
+    }
+description: |-
+  Registers a new store administrator with role STORE_OWNER. First log in as an existing STORE_OWNER or HQ_SUPER_ADMIN; this request inherits the collection Bearer accessToken. Set newAdminUsername and newAdminPassword before sending. Required: unique username (1–128 letters, digits, underscores or hyphens), password (12–256 characters), role:STORE_OWNER and reason (3–500 characters), plus eventId. The server assigns the URL storeId, generates userId/dataId, hashes the password with Argon2id and saves status ACTIVE / tokenVersion 1. The response excludes the password hash and does not log in the newly created user. To log in as the new admin, use the login endpoint with the new credentials. This is not a public signup or first-admin bootstrap endpoint, and it cannot create HQ_SUPER_ADMIN accounts.
+  
+  **Authorization:** STORE_OWNER or HQ_SUPER_ADMIN
+  
+  **Business write envelope:** a fresh eventId is injected automatically. Optional correlationId is accepted; idempotency-key is an alternative to eventId in the body. Identifiers are 1–128 characters using letters, digits, underscores or hyphens; reason must be 3–500 characters. Money/point values are integers bounded by 1000000000000. URL identifiers override body identities. For an identical retry, reuse the original eventId AND original body/version; response scripts update versions, so restore original values first. Set eventId manually to freeze it, otherwise leave it empty for new operations. Writes can change points, time, credentials or machine state; run individual requests deliberately.
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request body example
+  
+  Open **Body → raw → JSON**. Replace variables using collection values before sending. Numeric versions resolve to integers.
+  
+  ```json
+  {
+    "eventId": "{{_requestEventId}}",
+    "username": "{{newAdminUsername}}",
+    "password": "{{newAdminPassword}}",
+    "role": "STORE_OWNER",
+    "reason": "Register store administrator"
+  }
+  ```
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+        const value = "userId".split('.').reduce((node, key) => node == null ? undefined : node[key], result.data);
+        if (value !== undefined) pm.collectionVariables.set('adminUserId', value == null ? '' : String(value));
+      }
+    language: text/javascript

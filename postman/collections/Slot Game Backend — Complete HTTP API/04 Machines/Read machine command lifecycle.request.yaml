@@ -1,0 +1,70 @@
+$kind: http-request
+description: |-
+  Returns requested/acknowledged/succeeded/failed/timed-out command records. Acknowledgement and results come from the TAS-C socket client.
+  
+  **Authorization:** STORE_OWNER, HQ_SUPER_ADMIN or STORE_STAFF, or READ_ONLY_AUDITOR
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request input example
+  
+  This GET endpoint does not accept a JSON body. Use the URL identifiers and the **Params** tab.
+  
+  ```text
+  {{baseUrl}}/api/v1/stores/{{storeId}}/machines/{{machineId}}/commands?limit=100
+  ```
+  
+  Optional filters are listed in Params and disabled initially. Enable only the filters needed for your query.
+url: "{{baseUrl}}/api/v1/stores/{{storeId}}/machines/{{machineId}}/commands?limit=100"
+method: GET
+headers:
+  Accept: application/json
+queryParams:
+  - key: limit
+    value: "100"
+    description: Maximum records; 1–500, default 100.
+  - key: gameId
+    value: "{{gameId}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: machineId
+    value: "{{machineId}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: cardId
+    value: "{{cardId}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: kioskId
+    value: "{{kioskId}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: type
+    value: topup
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: action
+    value: auth.login
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: from
+    value: "{{from}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: to
+    value: "{{to}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+  - key: before
+    value: "{{before}}"
+    disabled: true
+    description: Optional filter. Enable and set a value before sending.
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+      }
+    language: text/javascript
+examples: ./.resources/Read machine command lifecycle.resources/examples
+order: 8000

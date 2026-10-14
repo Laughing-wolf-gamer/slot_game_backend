@@ -1,0 +1,28 @@
+$kind: http-request
+name: Readiness Check
+method: GET
+url: '{{baseUrl}}/health/ready'
+order: 2000
+auth:
+  type: noauth
+description: |-
+  Pings MongoDB. Returns 200 READY or 503 DATABASE_UNAVAILABLE.
+  
+  **Authorization:** No Bearer token required.
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request input example
+  
+  This GET endpoint does not accept a JSON body. Use the URL identifiers and the **Params** tab.
+  
+  ```text
+  {{baseUrl}}/health/ready
+  ```
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+      }
+    language: text/javascript

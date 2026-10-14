@@ -1,0 +1,3 @@
+$kind: collection
+description: Documented games and jackpots operations. Each request describes its own permissions and required input.
+order: 4000

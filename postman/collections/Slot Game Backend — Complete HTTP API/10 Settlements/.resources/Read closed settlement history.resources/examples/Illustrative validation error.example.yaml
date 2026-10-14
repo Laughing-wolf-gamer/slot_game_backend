@@ -1,0 +1,38 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/settlements/history?limit=100"
+  method: GET
+  headers:
+    Accept: application/json
+  queryParams:
+    - key: limit
+      value: "100"
+      description: Maximum records; 1–500, default 100.
+    - key: before
+      value: "{{before}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: from
+      value: "{{from}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: to
+      value: "{{to}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

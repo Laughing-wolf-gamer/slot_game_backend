@@ -1,0 +1,66 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/histories/card-registration?limit=100"
+  method: GET
+  headers:
+    Accept: application/json
+  queryParams:
+    - key: limit
+      value: "100"
+      description: Maximum records; 1–500, default 100.
+    - key: machineId
+      value: "{{machineId}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: cardId
+      value: "{{cardId}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: kioskId
+      value: "{{kioskId}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: gameId
+      value: "{{gameId}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: action
+      value: auth.login
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: from
+      value: "{{from}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: to
+      value: "{{to}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: before
+      value: "{{before}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+    - key: cursor
+      value: "{{historyCursor}}"
+      disabled: true
+      description: Opaque nextCursor from this history and the same filters.
+    - key: includeArchived
+      value: "true"
+      disabled: true
+      description: Include records before historyResetAt.
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

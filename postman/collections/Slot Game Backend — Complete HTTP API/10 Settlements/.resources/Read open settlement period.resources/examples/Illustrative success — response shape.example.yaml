@@ -1,0 +1,27 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/settlements/current?limit=100"
+  method: GET
+  headers:
+    Accept: application/json
+  queryParams:
+    - key: limit
+      value: "100"
+      description: Maximum records; 1–500, default 100.
+    - key: before
+      value: "{{before}}"
+      disabled: true
+      description: Optional filter. Enable and set a value before sending.
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": true,
+        "data": []
+      }
+order: 1000

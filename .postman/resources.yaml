@@ -1,0 +1,15 @@
+# Use this workspace to collaborate
+workspace:
+  id: 4e115deb-5a06-4eee-8713-f83395f22b4a
+
+# Each entry here maps a local resource to one or more corresponding objects in Postman Cloud
+
+cloudResources:
+  collections:
+    ../postman/collections/Slot Game Backend — Complete HTTP API: 9673f260-fb4b-4e12-99a5-2b044ec3393e
+
+# All resources in the `postman/` folder are automatically registered in Local View.
+# Point to additional files outside the `postman/` folder to register them individually. Example:
+#localResources:
+#  collections:
+#    - ../tests/E2E Test Collection/

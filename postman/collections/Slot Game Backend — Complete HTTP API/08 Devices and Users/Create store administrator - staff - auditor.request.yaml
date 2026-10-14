@@ -1,0 +1,48 @@
+$kind: http-request
+name: Create store administrator / staff / auditor
+description: |-
+  Required: username, password (12–256), role (STORE_OWNER/STORE_STAFF/READ_ONLY_AUDITOR), reason. Cannot create HQ_SUPER_ADMIN using this API. Choose a new unique username.
+  
+  **Authorization:** STORE_OWNER or HQ_SUPER_ADMIN
+  
+  **Business write envelope:** a fresh eventId is injected automatically. Optional correlationId is accepted; idempotency-key is an alternative to eventId in the body. Identifiers are 1–128 characters using letters, digits, underscores or hyphens; reason must be 3–500 characters. Money/point values are integers bounded by 1000000000000. URL identifiers override body identities. For an identical retry, reuse the original eventId AND original body/version; response scripts update versions, so restore original values first. Set eventId manually to freeze it, otherwise leave it empty for new operations. Writes can change points, time, credentials or machine state; run individual requests deliberately.
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request body example
+  
+  Open **Body → raw → JSON**. Replace variables using collection values before sending. Numeric versions resolve to integers.
+  
+  ```json
+  {
+    "eventId": "{{_requestEventId}}",
+    "username": "staff_001",
+    "password": "{{newPassword}}",
+    "role": "STORE_STAFF",
+    "reason": "{{reason}}"
+  }
+  ```
+url: "{{baseUrl}}/api/v1/stores/{{storeId}}/users"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "eventId": "{{_requestEventId}}",
+      "username": "staff_001",
+      "password": "{{newPassword}}",
+      "role": "STORE_STAFF",
+      "reason": "{{reason}}"
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+      }
+    language: text/javascript
+examples: ./.resources/Create store administrator - staff - auditor.resources/examples
+order: 5000

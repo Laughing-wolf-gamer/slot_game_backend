@@ -141,13 +141,26 @@ export function createBackend(database, config) {
 			});
 		} catch (error) {
 			if (event.eventName === 'card.validate.v1' || event.eventName.endsWith('password.verify.v1')) {
-				await Audit.insertOne({ storeId: actor.storeId, dataId: geneRandomId(), actorId: actor.actorId,
-					action: `${event.eventName}.failed`, eventId: event.eventId, machineId: actor.machineId,
-					kioskId: actor.kioskId, success: false });
+				logger.error("Error: validating card",event.eventName);
+				await Audit.insertOne({
+					storeId: actor.storeId,
+					dataId: geneRandomId(),
+					actorId: actor.actorId,
+					action: `${event.eventName}.failed`,
+					eventId: event.eventId,
+					machineId: actor.machineId,
+					kioskId: actor.kioskId,
+					success: false
+				
+				});
 			}
 			if (error.code === 11000) {
 				const existing = await Inbox.findOne(key).lean();
-				if (existing) { assert(existing.fingerprint === fingerprint, 'DUPLICATE_EVENT', 'Event ID reused with different content'); return existing.result; }
+				if (existing) {
+					assert(existing.fingerprint === fingerprint, 'DUPLICATE_EVENT', 'Event ID reused with different content');
+					return existing.result; 
+				
+				}
 				throw new AppError('CONFLICT', 'A conflicting record already exists', 409);
 			}
 			throw error;
@@ -345,6 +358,7 @@ export function createBackend(database, config) {
 				requireRole(a, owners);
 				const input = z.object({ username: id, role: z.enum(['STORE_OWNER', 'STORE_STAFF', 'READ_ONLY_AUDITOR']), password: z.string().min(12).max(256), reason }).strict().parse(p);
 				const { password, ...fields } = input;
+				
 				const user = {
 					...storeScope,
 					...fields,
@@ -722,9 +736,16 @@ export function createBackend(database, config) {
 			}
 			case 'card.validate.v1': {
 				requireRole(a, ['DEVICE_TAS_C', 'DEVICE_TAS_K', ...operators]);
-				const input = z.object({ cardId: id.optional(), cardUid: hexUid.optional(), machineNumber: z.number().int().positive().optional(), kioskFlag: z.boolean().optional() })
-					.strict().refine(v => Boolean(v.cardId) !== Boolean(v.cardUid), 'Supply exactly one card identity').parse(p);
+				const input = z.object({
+					cardId: id.optional(),
+					cardUid: hexUid.optional(),
+					machineNumber: z.number().int().positive().optional(),
+					kioskFlag: z.boolean().optional()
+				
+				}).strict().refine(v => Boolean(v.cardId) !== Boolean(v.cardUid), 'Supply exactly one card identity').parse(p);
+				logger.info(input,"data: ")
 				if (a.role === 'DEVICE_TAS_C') {
+
 					const machine = await Machine.findOne({ ...storeScope, machineId: a.machineId, status: { $ne: 'DELETED' } }, null, opts).lean();
 					assert(machine && (input.machineNumber === undefined || input.machineNumber === machine.machineNumber), 'FORBIDDEN', 'PC must match enrolled agent', 403);
 				}

@@ -1,0 +1,54 @@
+$kind: http-request
+description: |-
+  Required: expectedVersion, reason and changed fields. Uses the target machine version; permitted fields and lifecycle rules match the store endpoint.
+  
+  **Authorization:** HQ_SUPER_ADMIN only
+  Uses hqAccessToken.
+  
+  **Business write envelope:** a fresh eventId is injected automatically. Optional correlationId is accepted; idempotency-key is an alternative to eventId in the body. Identifiers are 1–128 characters using letters, digits, underscores or hyphens; reason must be 3–500 characters. Money/point values are integers bounded by 1000000000000. URL identifiers override body identities. For an identical retry, reuse the original eventId AND original body/version; response scripts update versions, so restore original values first. Set eventId manually to freeze it, otherwise leave it empty for new operations. Writes can change points, time, credentials or machine state; run individual requests deliberately.
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request body example
+  
+  Open **Body → raw → JSON**. Replace variables using collection values before sending. Numeric versions resolve to integers.
+  
+  ```json
+  {
+    "eventId": "{{_requestEventId}}",
+    "expectedVersion": {{hqMachineVersion}},
+    "reason": "{{reason}}",
+    "ipAddress": "127.0.0.1",
+    "feePlan": 10
+  }
+  ```
+url: "{{baseUrl}}/api/v1/hq/stores/{{hqStoreId}}/machines/{{hqMachineId}}"
+method: PATCH
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "eventId": "{{_requestEventId}}",
+      "expectedVersion": {{hqMachineVersion}},
+      "reason": "{{reason}}",
+      "ipAddress": "127.0.0.1",
+      "feePlan": 10
+    }
+auth:
+  type: bearer
+  credentials:
+    token: "{{hqAccessToken}}"
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+        const value = "stateVersion".split('.').reduce((node, key) => node == null ? undefined : node[key], result.data);
+        if (value !== undefined) pm.collectionVariables.set('hqMachineVersion', value == null ? '' : String(value));
+      }
+    language: text/javascript
+examples: ./.resources/HQ — modify target machine.resources/examples
+order: 5000

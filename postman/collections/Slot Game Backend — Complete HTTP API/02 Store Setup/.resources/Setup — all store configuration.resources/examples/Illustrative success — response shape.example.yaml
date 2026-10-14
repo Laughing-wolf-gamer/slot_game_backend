@@ -1,0 +1,27 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/setup"
+  method: GET
+  headers:
+    Accept: application/json
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": true,
+        "data": {
+          "configuration": {
+            "stateVersion": 0
+          },
+          "machines": [],
+          "games": [],
+          "settings": [],
+          "machineSettings": []
+        }
+      }
+order: 1000

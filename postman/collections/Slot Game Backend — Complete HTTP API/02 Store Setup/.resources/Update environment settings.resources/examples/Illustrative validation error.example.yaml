@@ -1,0 +1,37 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/environment"
+  method: PUT
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "expectedVersion": {{configVersion}},
+        "reason": "{{reason}}",
+        "environment": {
+          "operatingPcs": 10,
+          "serverIp": "127.0.0.1",
+          "storeName": "My Store",
+          "timezone": "Asia/Kolkata"
+        }
+      }
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

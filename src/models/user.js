@@ -13,6 +13,7 @@ export const schema = new mongoose.Schema({
 	role: { type: String, required: true },
 	status: { type: String, required: true },
 	tokenVersion: { type: Number, required: true, validate: safeInteger, min: 0 },
+	lockTime: { type: Date },
 	reason: {
 		type: String
 	
@@ -21,6 +22,7 @@ export const schema = new mongoose.Schema({
 }, { collection: 'users',timestamps:true, versionKey: false, strict: false, minimize: false, autoCreate: false, autoIndex: false });
 
 schema.index({"storeId":1,"username":1}, {"unique":true});
+schema.index({"role":1,"lockTime":1});
 
 validateWrites(schema);
 

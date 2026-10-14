@@ -26,16 +26,41 @@ export function requireRole(actor, roles) {
 export const owners = ['STORE_OWNER', 'HQ_SUPER_ADMIN'];
 export const operators = [...owners, 'STORE_STAFF'];
 export const readers = [...owners, 'READ_ONLY_AUDITOR'];
+const adminRoles = [...operators, 'READ_ONLY_AUDITOR'];
+const adminLockMs = 20 * 60 * 1000;
 
 
 export function createAuth(config, database) {
 
 	const issue = actor => jwt.sign(actor, config.jwtSecret, { expiresIn: '60m', issuer: 'project-j', audience: 'project-j-clients' });
+	async function touchAdmin(user, allowExpired = false) {
+		const now = new Date();
+		const filter = {
+			storeId: user.storeId,
+			userId: user.userId,
+			status: 'ACTIVE',
+			tokenVersion: user.tokenVersion
+		};
+		if (!allowExpired) {
+			filter.$or = [
+				{ lockTime: { $exists: false } },
+				{ lockTime: null },
+				{ lockTime: { $gt: now } }
+			];
+		}
+		return User.findOneAndUpdate(filter, {
+			$set: { lockTime: new Date(now.getTime() + adminLockMs) }
+		}, { returnDocument: 'after' }).lean();
+	}
 	async function access(input) {
 		try {
 			const claims = jwt.verify(input, config.jwtSecret, { issuer: 'project-j', audience: 'project-j-clients', algorithms: ['HS256'] });
-			const user = await User.findOne({ storeId: claims.storeId, userId: claims.actorId, status: 'ACTIVE' }).lean();
+			let user = await User.findOne({ storeId: claims.storeId, userId: claims.actorId, status: 'ACTIVE' }).lean();
 			assert(user && user.tokenVersion === claims.tokenVersion, 'AUTH_REQUIRED', 'Credential revoked', 401);
+			if (adminRoles.includes(user.role)) {
+				user = await touchAdmin(user);
+				assert(user, 'AUTH_REQUIRED', 'Session expired due to inactivity', 401);
+			}
 			await entitlement(claims.storeId);
 			return { 
 				actorId: user.userId, 
@@ -113,7 +138,7 @@ export function createAuth(config, database) {
 	}
 	async function login(input) {
 		const data = z.object({ storeId: id, username: id, password: z.string().min(1).max(256) }).strict().parse(input);
-		const user = await User.findOne({ storeId: data.storeId, username: data.username, status: 'ACTIVE' }).lean();
+		let user = await User.findOne({ storeId: data.storeId, username: data.username, status: 'ACTIVE' }).lean();
 		const valid = user && await argon2.verify(user.passwordHash, data.password);
 
 		await Audit.insertOne({
@@ -128,6 +153,10 @@ export function createAuth(config, database) {
 		assert(valid, 'AUTH_REQUIRED', 'Invalid credentials', 401);
 		await validateHQ(user.storeId);
 		await entitlement(user.storeId);
+		if (adminRoles.includes(user.role)) {
+			user = await touchAdmin(user, true);
+			assert(user, 'AUTH_REQUIRED', 'Credential changed', 401);
+		}
 		if (database && user.role === 'HQ_SUPER_ADMIN') await HqOutbox.insertOne({ storeId: user.storeId, dataId: randomUUID(),
 			type: 'hq.login', payload: { actorId: user.userId, at: new Date() }, status: 'PENDING', attempts: 0 });
 		return tokens(user);
@@ -145,8 +174,10 @@ export function createAuth(config, database) {
 
 		await validateHQ(user.storeId);
 		await entitlement(user.storeId);
+		const activeUser = adminRoles.includes(user.role) ? await touchAdmin(user) : user;
+		assert(activeUser, 'AUTH_REQUIRED', 'Session expired due to inactivity', 401);
 
-		return tokens(user);
+		return tokens(activeUser);
 	}
 	async function device(input, role) {
 		const data = z.object({ storeId: id, deviceId: id, secret: z.string().min(16).max(256) }).parse(input);

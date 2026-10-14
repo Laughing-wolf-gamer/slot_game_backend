@@ -1,0 +1,32 @@
+$kind: http-example
+request:
+  url: "{{baseUrl}}/api/v1/stores/{{storeId}}/cards/validate"
+  method: POST
+  headers:
+    Accept: application/json
+    Content-Type: application/json
+  body:
+    type: json
+    content: |-
+      {
+        "eventId": "{{_requestEventId}}",
+        "cardUid": "{{cardUid}}"
+      }
+response:
+  statusCode: 200
+  statusText: OK
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": true,
+        "eventId": "{{_requestEventId}}",
+        "serverSequence": 1,
+        "serverTime": "2026-10-14T00:00:00.000Z",
+        "stateVersion": null,
+        "data": {},
+        "error": null
+      }
+order: 1000

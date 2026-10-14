@@ -1,0 +1,3 @@
+$kind: collection
+description: Documented hq fleet administration operations. Each request describes its own permissions and required input.
+order: 12000

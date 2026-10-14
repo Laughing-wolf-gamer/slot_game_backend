@@ -7,8 +7,11 @@ import Outbox from '../models/outbox.js';
 import Presence from '../models/presence.js';
 import Store from '../models/store.js';
 import Award from '../models/award.js';
+import User from '../models/user.js';
+import RefreshToken from '../models/refresh-token.js';
 import { room, geneRandomId } from '../modules/backend.js';
 const logger = createConsoleLogger();
+const adminRoles = ['STORE_OWNER', 'STORE_STAFF', 'READ_ONLY_AUDITOR', 'HQ_SUPER_ADMIN'];
 function notificationNamespaces(row) {
 	logger.debug(row,"notification namespace ");
     if (row.room.endsWith(':admins')) return ['/admin'];
@@ -23,7 +26,40 @@ export function createWorkers({ backend, config, io }) {
 	let timer;
 	let pending = Promise.resolve();
 	async function timerTicks() {
-        
+		const now = new Date();
+		const idleAdmins = await User.find({
+			role: { $in: adminRoles },
+			lockTime: { $type: 'date', $lte: now }
+		}).select({ storeId: 1, userId: 1 }).lean().exec();
+		for (const admin of idleAdmins) {
+			const expired = await User.updateOne({
+				storeId: admin.storeId,
+				userId: admin.userId,
+				role: { $in: adminRoles },
+				lockTime: { $type: 'date', $lte: now }
+			}, {
+				$set: { lockTime: null },
+				$inc: { tokenVersion: 1 }
+			});
+			if (!expired.modifiedCount) continue;
+			await RefreshToken.updateMany({ storeId: admin.storeId, userId: admin.userId, revoked: false }, {
+				$set: { revoked: true }
+			});
+			await Audit.insertOne({
+				dataId: geneRandomId(),
+				storeId: admin.storeId,
+				actorId: admin.userId,
+				action: 'auth.session.expired',
+				reason: 'INACTIVITY'
+			});
+			for (const socket of io.of('/admin').sockets.values()) {
+				if (socket.data.actor?.storeId === admin.storeId && socket.data.actor?.actorId === admin.userId) {
+					socket.emit('auth.session.expired.v1', { reason: 'INACTIVITY' });
+					socket.disconnect(true);
+				}
+			}
+		}
+
         const deliveryRoutes = [];
         for (const name of ['/admin', '/game', '/agent', '/kiosk']) {
             const rooms = [...io.of(name).adapter.rooms].filter(([, sockets]) => sockets.size).map(([room]) => room);

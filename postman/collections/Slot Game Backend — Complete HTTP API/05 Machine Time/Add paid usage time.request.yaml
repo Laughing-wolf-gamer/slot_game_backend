@@ -1,0 +1,49 @@
+$kind: http-request
+description: |-
+  Required: expectedVersion, minutes, reason; optional cardId. Deducts card points using authoritative fees, or prepaid minutes with useCardTime:true. Maximum 500 minutes.
+  
+  **Authorization:** STORE_OWNER, HQ_SUPER_ADMIN or STORE_STAFF
+  
+  **Business write envelope:** a fresh eventId is injected automatically. Optional correlationId is accepted; idempotency-key is an alternative to eventId in the body. Identifiers are 1–128 characters using letters, digits, underscores or hyphens; reason must be 3–500 characters. Money/point values are integers bounded by 1000000000000. URL identifiers override body identities. For an identical retry, reuse the original eventId AND original body/version; response scripts update versions, so restore original values first. Set eventId manually to freeze it, otherwise leave it empty for new operations. Writes can change points, time, credentials or machine state; run individual requests deliberately.
+  
+  **Common errors:** 400 INVALID_PAYLOAD / invalid state; 401 AUTH_REQUIRED; 403 FORBIDDEN; 404 NOT_FOUND; 409 STALE_VERSION / CONFLICT. Business success returns HTTP 200, including create/delete. Rate limiting can return 429.
+  
+  ### Request body example
+  
+  Open **Body → raw → JSON**. Replace variables using collection values before sending. Numeric versions resolve to integers.
+  
+  ```json
+  {
+    "eventId": "{{_requestEventId}}",
+    "expectedVersion": {{machineVersion}},
+    "reason": "{{reason}}",
+    "cardId": "{{cardId}}",
+    "minutes": 30
+  }
+  ```
+url: "{{baseUrl}}/api/v1/stores/{{storeId}}/machines/{{machineId}}/time/paid"
+method: POST
+headers:
+  Accept: application/json
+  Content-Type: application/json
+body:
+  type: json
+  content: |-
+    {
+      "eventId": "{{_requestEventId}}",
+      "expectedVersion": {{machineVersion}},
+      "reason": "{{reason}}",
+      "cardId": "{{cardId}}",
+      "minutes": 30
+    }
+scripts:
+  - type: afterResponse
+    code: |-
+      let result; try { result = pm.response.json(); } catch (_) {}
+      if (pm.response.code >= 200 && pm.response.code < 300 && result && result.ok !== false) {
+        const value = "stateVersion".split('.').reduce((node, key) => node == null ? undefined : node[key], result.data);
+        if (value !== undefined) pm.collectionVariables.set('machineVersion', value == null ? '' : String(value));
+      }
+    language: text/javascript
+examples: ./.resources/Add paid usage time.resources/examples
+order: 3000

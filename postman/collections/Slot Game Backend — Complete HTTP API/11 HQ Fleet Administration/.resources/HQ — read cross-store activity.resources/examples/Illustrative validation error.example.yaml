@@ -1,0 +1,38 @@
+$kind: http-example
+auth:
+  type: bearer
+  credentials:
+    token: "{{hqAccessToken}}"
+request:
+  url: "{{baseUrl}}/api/v1/hq/activity?limit=100"
+  method: GET
+  headers:
+    Accept: application/json
+  queryParams:
+    - key: limit
+      value: "100"
+      description: 1–500; default 100.
+    - key: storeId
+      value: "{{hqStoreId}}"
+      disabled: true
+      description: Optional; omit to include every store in this backend database.
+    - key: cursor
+      value: "{{hqCursor}}"
+      disabled: true
+      description: Opaque nextCursor from the same HQ endpoint and filter.
+response:
+  statusCode: 400
+  statusText: Bad Request
+  headers:
+    Content-Type: application/json
+  body:
+    type: text
+    content: |-
+      {
+        "ok": false,
+        "error": {
+          "code": "INVALID_PAYLOAD",
+          "message": "Payload validation failed"
+        }
+      }
+order: 2000

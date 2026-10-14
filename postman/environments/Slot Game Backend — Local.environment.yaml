@@ -1,0 +1,4 @@
+name: Slot Game Backend — Local
+values:
+  - key: baseUrl
+    value: 'http://localhost:5000'
